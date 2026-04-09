@@ -1,5 +1,6 @@
 import os
 import requests
+import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -98,7 +99,7 @@ def get_top():
 
         return text
     except:
-        return None
+        return "Lỗi lấy dữ liệu"
 
 
 # ================= TELEGRAM =================
@@ -142,17 +143,23 @@ async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rate = get_funding()
-    await update.message.reply_text(f"📈 BTC Funding Rate\n\n{rate:.4f}%")
+    await update.message.reply_text(
+        f"📈 BTC Funding Rate\n\n{rate:.4f}%"
+    )
 
 
 async def oi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    oi = get_oi()
-    await update.message.reply_text(f"📊 BTC Open Interest\n\n{oi:,.0f}")
+    oi_value = get_oi()
+    await update.message.reply_text(
+        f"📊 BTC Open Interest\n\n{oi_value:,.0f}"
+    )
 
 
 async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dom = get_dominance()
-    await update.message.reply_text(f"👑 BTC Dominance\n\n{dom:.2f}%")
+    await update.message.reply_text(
+        f"👑 BTC Dominance\n\n{dom:.2f}%"
+    )
 
 
 async def longshort(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,16 +175,16 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    price = get_price("btc")
-    funding = get_funding()
-    fear, state = get_fear()
+    price_value = get_price("btc")
+    funding_value = get_funding()
+    fear_value, state = get_fear()
     dom = get_dominance()
 
     msg = (
         "📊 Crypto Market Overview\n\n"
-        f"BTC Price: ${price:,}\n"
-        f"Funding: {funding:.4f}%\n"
-        f"Fear Index: {fear} ({state})\n"
+        f"BTC Price: ${price_value:,}\n"
+        f"Funding: {funding_value:.4f}%\n"
+        f"Fear Index: {fear_value} ({state})\n"
         f"BTC Dominance: {dom:.2f}%"
     )
 
@@ -195,9 +202,10 @@ telegram_app.add_handler(CommandHandler("top", top))
 telegram_app.add_handler(CommandHandler("market", market))
 
 
-# ================= FLASK WEBHOOK =================
+# ================= FLASK =================
 
 flask_app = Flask(__name__)
+
 
 @flask_app.route("/")
 def home():
@@ -205,17 +213,26 @@ def home():
 
 
 @flask_app.route("/webhook", methods=["POST"])
-async def webhook():
+def webhook():
     data = request.get_json()
+
     update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
+
+    asyncio.run(telegram_app.process_update(update))
+
     return "ok"
 
 
-if __name__ == "__main__":
-    telegram_app.initialize()
-    telegram_app.bot.set_webhook(
+async def main():
+    await telegram_app.initialize()
+    await telegram_app.start()
+
+    await telegram_app.bot.set_webhook(
         url=os.getenv("RENDER_EXTERNAL_URL") + "/webhook"
     )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
     flask_app.run(host="0.0.0.0", port=10000)
