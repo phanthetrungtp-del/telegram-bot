@@ -48,12 +48,13 @@ def safe_request(url):
 
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
+        "Accept": "application/json",
+        "Connection": "keep-alive"
     }
 
-    for _ in range(5):
+    for _ in range(3):
         try:
-            r = requests.get(url, headers=headers, timeout=15)
+            r = requests.get(url, headers=headers, timeout=10)
 
             print("STATUS:", r.status_code, url)
 
@@ -68,51 +69,48 @@ def safe_request(url):
 
 # ================= PRICE =================
 
-def get_price_coingecko(symbol):
-
-    symbol = COIN_MAP.get(symbol.lower(), symbol.lower())
-
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usd"
-
-    data = safe_request(url)
-
-    if not data:
-        return None
-
-    return data.get(symbol, {}).get("usd")
-
-
-def get_price_binance(symbol):
-
-    pair = PAIR_MAP.get(symbol.lower())
-
-    if not pair:
-        return None
-
-    url = f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
-
-    data = safe_request(url)
-
-    if not data:
-        return None
-
-    try:
-        return float(data["price"])
-    except:
-        return None
-
-
 def get_price(symbol):
 
-    price = get_price_coingecko(symbol)
+    pair = PAIR_MAP.get(symbol.lower())
+    coin = COIN_MAP.get(symbol.lower())
 
-    if price:
-        return price, "CoinGecko"
+    if not pair:
+        return None, None
 
-    price = get_price_binance(symbol)
+    # 1 Binance
+    data = safe_request(
+        f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
+    )
 
-    if price:
-        return price, "Binance"
+    if data and "price" in data:
+        return float(data["price"]), "Binance"
+
+    # 2 Bybit
+    data = safe_request(
+        f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}"
+    )
+
+    if data and data.get("result"):
+        try:
+            return float(data["result"]["list"][0]["lastPrice"]), "Bybit"
+        except:
+            pass
+
+    # 3 CoinGecko
+    data = safe_request(
+        f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd"
+    )
+
+    if data and coin in data:
+        return data[coin]["usd"], "CoinGecko"
+
+    # 4 OKX
+    data = safe_request(
+        f"https://www.okx.com/api/v5/market/ticker?instId={pair}"
+    )
+
+    if data and data.get("data"):
+        return float(data["data"][0]["last"]), "OKX"
 
     return None, None
 
@@ -132,17 +130,27 @@ def get_fear():
 
 def get_funding():
 
+    # 1 Bybit
+    data = safe_request(
+        "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
+    )
+
+    if data and data.get("result"):
+        try:
+            rate = data["result"]["list"][0]["fundingRate"]
+            return float(rate) * 100
+        except:
+            pass
+
+    # 2 Binance
     data = safe_request(
         "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
     )
 
-    if not data:
-        return None
-
-    try:
+    if data and "lastFundingRate" in data:
         return float(data["lastFundingRate"]) * 100
-    except:
-        return None
+
+    return None
 
 
 def get_dominance():
@@ -219,7 +227,7 @@ async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"📈 BTC Funding: {rate:.4f}%\n"
-        f"Source: Binance"
+        f"Source: Bybit/Binance"
     )
 
 
@@ -291,10 +299,7 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
     for user in users:
         try:
-            await context.bot.send_message(
-                chat_id=user,
-                text=msg
-            )
+            await context.bot.send_message(chat_id=user, text=msg)
         except:
             pass
 
