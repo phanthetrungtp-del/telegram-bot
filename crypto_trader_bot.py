@@ -47,8 +47,7 @@ def safe_request(url):
     try:
         r = requests.get(url, headers=headers, timeout=10)
 
-        print("URL:", url)
-        print("STATUS:", r.status_code)
+        print("STATUS:", r.status_code, url)
 
         if r.status_code == 200:
             return r.json()
@@ -100,18 +99,46 @@ def get_funding():
         return None
 
 
+# ================= LONG SHORT =================
+
+def get_long_short():
+
+    url = "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=BTC"
+
+    data = safe_request(url)
+
+    if not data:
+        return None
+
+    try:
+        d = data["data"][-1]
+
+        ratio = float(d["longShortRatio"])
+        long_acc = float(d["longAccount"]) * 100
+        short_acc = float(d["shortAccount"]) * 100
+
+        return ratio, long_acc, short_acc
+
+    except:
+        return None
+
+
 # ================= FEAR =================
 
 def get_fear():
 
-    data = safe_request("https://api.alternative.me/fng/")
+    url = "https://api.alternative.me/fng/"
+
+    data = safe_request(url)
 
     if not data:
-        return None, None
+        return None
 
-    d = data["data"][0]
-
-    return d["value"], d["value_classification"]
+    try:
+        d = data["data"][0]
+        return d["value"], d["value_classification"]
+    except:
+        return None
 
 
 # ================= TELEGRAM =================
@@ -126,11 +153,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🚀 Crypto Trader Bot\n\n"
-        "Auto update mỗi 1 giờ ⏰\n\n"
         "/price btc\n"
         "/funding\n"
+        "/longshort\n"
         "/fear\n"
-        "/market"
+        "/market\n\n"
+        "⏰ Auto update mỗi 1 giờ"
     )
 
 
@@ -147,8 +175,7 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Không lấy được giá")
 
     await update.message.reply_text(
-        f"💰 {coin.upper()} = ${p:,.2f}\n"
-        f"Source: OKX"
+        f"💰 {coin.upper()} = ${p:,.2f}\nSource: OKX"
     )
 
 
@@ -160,22 +187,41 @@ async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Funding API lỗi")
 
     await update.message.reply_text(
-        f"📈 BTC Funding: {rate:.4f}%\n"
-        f"Source: OKX"
+        f"📈 BTC Funding: {rate:.4f}%\nSource: OKX"
     )
+
+
+async def longshort(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    data = get_long_short()
+
+    if not data:
+        return await update.message.reply_text("Long Short API lỗi")
+
+    ratio, long_acc, short_acc = data
+
+    msg = (
+        "📊 BTC Long/Short Ratio\n\n"
+        f"Ratio: {ratio:.2f}\n"
+        f"Long: {long_acc:.2f}%\n"
+        f"Short: {short_acc:.2f}%\n\n"
+        "Source: OKX"
+    )
+
+    await update.message.reply_text(msg)
 
 
 async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    value, text = get_fear()
+    data = get_fear()
 
-    if not value:
+    if not data:
         return await update.message.reply_text("Fear API lỗi")
 
+    value, text = data
+
     await update.message.reply_text(
-        f"😨 Fear Index: {value}\n"
-        f"State: {text}\n"
-        f"Source: alternative.me"
+        f"😨 Fear Index: {value}\nState: {text}"
     )
 
 
@@ -183,16 +229,26 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     btc = get_price("btc")
     funding = get_funding()
-    fear, state = get_fear()
+    longshort_data = get_long_short()
+    fear_data = get_fear()
 
     btc = f"${btc:,.2f}" if btc else "N/A"
     funding = f"{funding:.4f}%" if funding else "N/A"
-    fear_text = f"{fear} ({state})" if fear else "N/A"
+
+    ls_text = "N/A"
+    if longshort_data:
+        ratio, _, _ = longshort_data
+        ls_text = f"{ratio:.2f}"
+
+    fear_text = "N/A"
+    if fear_data:
+        fear_text = f"{fear_data[0]} ({fear_data[1]})"
 
     msg = (
         "📊 Market Overview\n\n"
         f"BTC: {btc}\n"
         f"Funding: {funding}\n"
+        f"Long/Short: {ls_text}\n"
         f"Fear: {fear_text}\n\n"
         "Data provided by OKX"
     )
@@ -211,16 +267,26 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
     btc = get_price("btc")
     funding = get_funding()
-    fear, state = get_fear()
+    longshort_data = get_long_short()
+    fear_data = get_fear()
 
     btc = f"${btc:,.2f}" if btc else "N/A"
     funding = f"{funding:.4f}%" if funding else "N/A"
-    fear_text = f"{fear} ({state})" if fear else "N/A"
+
+    ls_text = "N/A"
+    if longshort_data:
+        ratio, _, _ = longshort_data
+        ls_text = f"{ratio:.2f}"
+
+    fear_text = "N/A"
+    if fear_data:
+        fear_text = f"{fear_data[0]} ({fear_data[1]})"
 
     msg = (
         "⏰ Hourly Crypto Update\n\n"
         f"BTC: {btc}\n"
         f"Funding: {funding}\n"
+        f"Long/Short: {ls_text}\n"
         f"Fear: {fear_text}\n\n"
         "Data provided by OKX"
     )
@@ -237,6 +303,7 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("price", price))
 app.add_handler(CommandHandler("funding", funding))
+app.add_handler(CommandHandler("longshort", longshort))
 app.add_handler(CommandHandler("fear", fear))
 app.add_handler(CommandHandler("market", market))
 
@@ -256,6 +323,6 @@ if __name__ == "__main__":
     app.run_webhook(
         listen="0.0.0.0",
         port=10000,
-        webhook_url=RENDER_URL + "/webhook",
-        url_path="webhook"
+        url_path="webhook",
+        webhook_url=RENDER_URL + "/webhook"
     )
