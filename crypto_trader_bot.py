@@ -48,55 +48,36 @@ def safe_request(url):
 
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Connection": "keep-alive"
+        "Accept": "application/json"
     }
 
-    for _ in range(3):
-        try:
-            r = requests.get(url, headers=headers, timeout=10)
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
 
-            print("STATUS:", r.status_code, url)
+        print("URL:", url)
+        print("STATUS:", r.status_code)
 
-            if r.status_code == 200:
-                return r.json()
+        if r.status_code == 200:
+            return r.json()
 
-        except Exception as e:
-            print("ERROR:", e)
+        return None
 
-    return None
+    except Exception as e:
+        print("ERROR:", e)
+        return None
 
 
 # ================= PRICE =================
 
 def get_price(symbol):
 
-    pair = PAIR_MAP.get(symbol.lower())
     coin = COIN_MAP.get(symbol.lower())
+    pair = PAIR_MAP.get(symbol.lower())
 
-    if not pair:
+    if not coin:
         return None, None
 
-    # 1 Binance
-    data = safe_request(
-        f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
-    )
-
-    if data and "price" in data:
-        return float(data["price"]), "Binance"
-
-    # 2 Bybit
-    data = safe_request(
-        f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}"
-    )
-
-    if data and data.get("result"):
-        try:
-            return float(data["result"]["list"][0]["lastPrice"]), "Bybit"
-        except:
-            pass
-
-    # 3 CoinGecko
+    # 1 CoinGecko
     data = safe_request(
         f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd"
     )
@@ -104,13 +85,64 @@ def get_price(symbol):
     if data and coin in data:
         return data[coin]["usd"], "CoinGecko"
 
+    # 2 Binance
+    if pair:
+        data = safe_request(
+            f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
+        )
+
+        if data and "price" in data:
+            return float(data["price"]), "Binance"
+
+    # 3 Bybit
+    if pair:
+        data = safe_request(
+            f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}"
+        )
+
+        if data and data.get("result"):
+            try:
+                return float(data["result"]["list"][0]["lastPrice"]), "Bybit"
+            except:
+                pass
+
     # 4 OKX
+    if pair:
+        data = safe_request(
+            f"https://www.okx.com/api/v5/market/ticker?instId={pair}"
+        )
+
+        if data and data.get("data"):
+            return float(data["data"][0]["last"]), "OKX"
+
+    return None, None
+
+
+# ================= FUNDING =================
+
+def get_funding():
+
+    # 1 Bybit
     data = safe_request(
-        f"https://www.okx.com/api/v5/market/ticker?instId={pair}"
+        "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
     )
 
-    if data and data.get("data"):
-        return float(data["data"][0]["last"]), "OKX"
+    if data and data.get("result"):
+        try:
+            rate = data["result"]["list"][0]["fundingRate"]
+
+            if rate:
+                return float(rate) * 100, "Bybit"
+        except:
+            pass
+
+    # 2 Binance
+    data = safe_request(
+        "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
+    )
+
+    if data and "lastFundingRate" in data:
+        return float(data["lastFundingRate"]) * 100, "Binance"
 
     return None, None
 
@@ -125,32 +157,8 @@ def get_fear():
         return None, None
 
     d = data["data"][0]
+
     return d["value"], d["value_classification"]
-
-
-def get_funding():
-
-    # 1 Bybit
-    data = safe_request(
-        "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
-    )
-
-    if data and data.get("result"):
-        try:
-            rate = data["result"]["list"][0]["fundingRate"]
-            return float(rate) * 100
-        except:
-            pass
-
-    # 2 Binance
-    data = safe_request(
-        "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
-    )
-
-    if data and "lastFundingRate" in data:
-        return float(data["lastFundingRate"]) * 100
-
-    return None
 
 
 def get_dominance():
@@ -177,10 +185,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🚀 Crypto Trader Bot\n\n"
-        "Bạn sẽ nhận Market Update mỗi 1 giờ ⏰\n\n"
+        "Auto Market mỗi 1 giờ ⏰\n\n"
         "/price btc\n"
-        "/fear\n"
         "/funding\n"
+        "/fear\n"
         "/dominance\n"
         "/market"
     )
@@ -204,6 +212,19 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    rate, source = get_funding()
+
+    if not rate:
+        return await update.message.reply_text("Không lấy được funding")
+
+    await update.message.reply_text(
+        f"📈 BTC Funding: {rate:.4f}%\n"
+        f"Source: {source}"
+    )
+
+
 async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     value, text = get_fear()
@@ -213,21 +234,7 @@ async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"😨 Fear Index: {value}\n"
-        f"State: {text}\n\n"
-        f"Source: alternative.me"
-    )
-
-
-async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    rate = get_funding()
-
-    if not rate:
-        return await update.message.reply_text("API lỗi")
-
-    await update.message.reply_text(
-        f"📈 BTC Funding: {rate:.4f}%\n"
-        f"Source: Bybit/Binance"
+        f"State: {text}"
     )
 
 
@@ -247,7 +254,7 @@ async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     btc, src = get_price("btc")
-    funding = get_funding()
+    funding, fsrc = get_funding()
     fear, state = get_fear()
     dom = get_dominance()
 
@@ -275,11 +282,10 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
     users = load_users()
 
     if not users:
-        print("No users")
         return
 
     btc, src = get_price("btc")
-    funding = get_funding()
+    funding, fsrc = get_funding()
     fear, state = get_fear()
     dom = get_dominance()
 
@@ -308,8 +314,8 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("price", price))
-app.add_handler(CommandHandler("fear", fear))
 app.add_handler(CommandHandler("funding", funding))
+app.add_handler(CommandHandler("fear", fear))
 app.add_handler(CommandHandler("dominance", dominance))
 app.add_handler(CommandHandler("market", market))
 
