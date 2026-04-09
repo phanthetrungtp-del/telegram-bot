@@ -1,1 +1,1 @@
-crypto_trader_bot.py
+python crypto_trader_bot.py
