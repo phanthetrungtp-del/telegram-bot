@@ -1,11 +1,13 @@
 import os
+import json
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
-CHAT_ID = os.getenv("CHAT_ID")
+
+USERS_FILE = "users.json"
 
 COIN_MAP = {
     "btc": "bitcoin",
@@ -21,25 +23,45 @@ PAIR_MAP = {
     "bnb": "BNBUSDT"
 }
 
+# ================= USERS =================
+
+def load_users():
+    try:
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f)
+
+def add_user(chat_id):
+    users = load_users()
+    if chat_id not in users:
+        users.append(chat_id)
+        save_users(users)
+
 # ================= SAFE REQUEST =================
 
 def safe_request(url):
 
     headers = {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
     }
 
-    for _ in range(3):
+    for _ in range(5):
         try:
-            r = requests.get(url, headers=headers, timeout=10)
+            r = requests.get(url, headers=headers, timeout=15)
+
+            print("STATUS:", r.status_code, url)
 
             if r.status_code == 200:
                 return r.json()
 
-            print("API ERROR:", r.status_code, url)
-
         except Exception as e:
-            print("REQUEST ERROR:", e)
+            print("ERROR:", e)
 
     return None
 
@@ -111,13 +133,16 @@ def get_fear():
 def get_funding():
 
     data = safe_request(
-        "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1"
+        "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
     )
 
     if not data:
         return None
 
-    return float(data[0]["fundingRate"]) * 100
+    try:
+        return float(data["lastFundingRate"]) * 100
+    except:
+        return None
 
 
 def get_dominance():
@@ -139,8 +164,12 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    chat_id = update.message.chat_id
+    add_user(chat_id)
+
     await update.message.reply_text(
         "🚀 Crypto Trader Bot\n\n"
+        "Bạn sẽ nhận Market Update mỗi 1 giờ ⏰\n\n"
         "/price btc\n"
         "/fear\n"
         "/funding\n"
@@ -235,6 +264,12 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
+    users = load_users()
+
+    if not users:
+        print("No users")
+        return
+
     btc, src = get_price("btc")
     funding = get_funding()
     fear, state = get_fear()
@@ -254,10 +289,14 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
         "Data provided by CoinGecko"
     )
 
-    await context.bot.send_message(
-        chat_id=CHAT_ID,
-        text=msg
-    )
+    for user in users:
+        try:
+            await context.bot.send_message(
+                chat_id=user,
+                text=msg
+            )
+        except:
+            pass
 
 
 # ================= HANDLERS =================
@@ -279,7 +318,7 @@ if __name__ == "__main__":
     job_queue.run_repeating(
         auto_market,
         interval=3600,
-        first=30
+        first=60
     )
 
     app.run_webhook(
