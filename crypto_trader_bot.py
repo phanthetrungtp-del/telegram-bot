@@ -214,6 +214,10 @@ async def telegram_main():
 
 
 if __name__ == "__main__":
-    loop.create_task(telegram_main())
 
-    flask_app.run(host="0.0.0.0", port=10000)
+    loop.run_until_complete(telegram_main())
+
+    flask_app.run(
+        host="0.0.0.0",
+        port=10000
+    )
