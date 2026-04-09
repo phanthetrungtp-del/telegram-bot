@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
+CHAT_ID = os.getenv("CHAT_ID")
 
 COIN_MAP = {
     "btc": "bitcoin",
@@ -40,7 +41,6 @@ def get_fear():
         r = requests.get(url, timeout=5)
 
         if r.status_code != 200:
-            print("Fear error:", r.text)
             return None, None
 
         data = r.json()["data"][0]
@@ -58,7 +58,6 @@ def get_funding():
         r = requests.get(url, timeout=5)
 
         if r.status_code != 200:
-            print("Funding error:", r.text)
             return None
 
         data = r.json()
@@ -79,7 +78,6 @@ def get_oi():
         r = requests.get(url, timeout=5)
 
         if r.status_code != 200:
-            print("OI error:", r.text)
             return None
 
         data = r.json()
@@ -96,7 +94,6 @@ def get_dominance():
         r = requests.get(url, timeout=5)
 
         if r.status_code != 200:
-            print("Dominance error:", r.text)
             return None
 
         data = r.json()
@@ -113,7 +110,6 @@ def get_long_short():
         r = requests.get(url, timeout=5)
 
         if r.status_code != 200:
-            print("LongShort error:", r.text)
             return None, None
 
         data = r.json()
@@ -145,8 +141,7 @@ def get_top():
 
         return text
 
-    except Exception as e:
-        print("Top exception:", e)
+    except:
         return "Lỗi lấy dữ liệu"
 
 
@@ -156,8 +151,14 @@ telegram_app = ApplicationBuilder().token(TOKEN).build()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    global CHAT_ID
+
+    CHAT_ID = update.effective_chat.id
+
     await update.message.reply_text(
         "🚀 Crypto Trader Bot\n\n"
+        "Auto gửi mỗi 1 giờ đã bật\n\n"
         "/price btc\n"
         "/fear\n"
         "/funding\n"
@@ -264,6 +265,34 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
+# ================= AUTO HOURLY =================
+
+async def auto_market(context: ContextTypes.DEFAULT_TYPE):
+
+    if not CHAT_ID:
+        return
+
+    price_value = get_price("btc")
+    funding_value = get_funding()
+    fear_value, state = get_fear()
+    dom = get_dominance()
+
+    price_text = f"${price_value:,}" if price_value else "N/A"
+    funding_text = f"{funding_value:.4f}%" if funding_value else "N/A"
+    fear_text = f"{fear_value} ({state})" if fear_value else "N/A"
+    dom_text = f"{dom:.2f}%" if dom else "N/A"
+
+    msg = (
+        "⏰ Hourly Crypto Update\n\n"
+        f"BTC Price: {price_text}\n"
+        f"Funding: {funding_text}\n"
+        f"Fear Index: {fear_text}\n"
+        f"BTC Dominance: {dom_text}"
+    )
+
+    await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+
+
 async def error_handler(update, context):
     print("Error:", context.error)
 
@@ -284,6 +313,12 @@ telegram_app.add_handler(CommandHandler("market", market))
 # ================= RUN =================
 
 if __name__ == "__main__":
+
+    telegram_app.job_queue.run_repeating(
+        auto_market,
+        interval=3600,
+        first=60
+    )
 
     telegram_app.run_webhook(
         listen="0.0.0.0",
