@@ -1,7 +1,5 @@
 import os
 import requests
-import asyncio
-from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -79,6 +77,7 @@ def get_top():
         r = requests.get(url).json()
 
         text = "🏆 Top 10 Crypto\n\n"
+
         for i, coin in enumerate(r, 1):
             text += f"{i}. {coin['symbol'].upper()} — ${coin['current_price']:,}\n"
 
@@ -180,44 +179,13 @@ telegram_app.add_handler(CommandHandler("top", top))
 telegram_app.add_handler(CommandHandler("market", market))
 
 
-# ================= FLASK =================
-
-flask_app = Flask(__name__)
-loop = asyncio.get_event_loop()
-
-
-@flask_app.route("/")
-def home():
-    return "Crypto Trader Bot Running"
-
-
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json()
-
-    update = Update.de_json(data, telegram_app.bot)
-
-    loop.create_task(telegram_app.update_queue.put(update))
-
-    return "ok"
-
-
-async def telegram_main():
-    await telegram_app.initialize()
-    await telegram_app.start()
-
-    if RENDER_URL:
-        await telegram_app.bot.set_webhook(
-            url=RENDER_URL + "/webhook"
-        )
-        print("Webhook set:", RENDER_URL + "/webhook")
-
+# ================= RUN WEBHOOK =================
 
 if __name__ == "__main__":
 
-    loop.run_until_complete(telegram_main())
-
-    flask_app.run(
-        host="0.0.0.0",
-        port=10000
+    telegram_app.run_webhook(
+        listen="0.0.0.0",
+        port=10000,
+        webhook_url=RENDER_URL + "/webhook",
+        url_path="webhook"
     )
