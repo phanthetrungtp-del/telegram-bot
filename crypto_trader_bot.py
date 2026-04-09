@@ -15,7 +15,7 @@ COIN_MAP = {
     "bnb": "binancecoin"
 }
 
-# ================= PRICE =================
+# ================= API =================
 
 def get_price(symbol):
     symbol = COIN_MAP.get(symbol.lower(), symbol.lower())
@@ -27,8 +27,6 @@ def get_price(symbol):
         return None
 
 
-# ================= FEAR GREED =================
-
 def get_fear():
     try:
         url = "https://api.alternative.me/fng/"
@@ -39,8 +37,6 @@ def get_fear():
         return None, None
 
 
-# ================= FUNDING =================
-
 def get_funding():
     try:
         url = "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1"
@@ -49,8 +45,6 @@ def get_funding():
     except:
         return None
 
-
-# ================= OPEN INTEREST =================
 
 def get_oi():
     try:
@@ -61,8 +55,6 @@ def get_oi():
         return None
 
 
-# ================= BTC DOMINANCE =================
-
 def get_dominance():
     try:
         url = "https://api.coingecko.com/api/v3/global"
@@ -71,8 +63,6 @@ def get_dominance():
     except:
         return None
 
-
-# ================= LONG SHORT =================
 
 def get_long_short():
     try:
@@ -83,15 +73,12 @@ def get_long_short():
         return None, None
 
 
-# ================= TOP COINS =================
-
 def get_top():
     try:
         url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=10"
         r = requests.get(url).json()
 
         text = "🏆 Top 10 Crypto\n\n"
-
         for i, coin in enumerate(r, 1):
             text += f"{i}. {coin['symbol'].upper()} — ${coin['current_price']:,}\n"
 
@@ -196,6 +183,7 @@ telegram_app.add_handler(CommandHandler("market", market))
 # ================= FLASK =================
 
 flask_app = Flask(__name__)
+loop = asyncio.get_event_loop()
 
 
 @flask_app.route("/")
@@ -209,7 +197,7 @@ def webhook():
 
     update = Update.de_json(data, telegram_app.bot)
 
-    asyncio.run(telegram_app.process_update(update))
+    loop.create_task(telegram_app.process_update(update))
 
     return "ok"
 
@@ -226,7 +214,6 @@ async def telegram_main():
 
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
     loop.create_task(telegram_main())
 
     flask_app.run(host="0.0.0.0", port=10000)
