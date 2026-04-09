@@ -1,6 +1,10 @@
 import os
 import json
 import requests
+import threading
+import time
+from flask import Flask
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -15,6 +19,19 @@ PAIR_MAP = {
     "sol": "SOL-USDT",
     "bnb": "BNB-USDT"
 }
+
+# ================= FLASK =================
+
+web = Flask(__name__)
+
+@web.route("/")
+def home():
+    return "Bot is running"
+
+@web.route("/health")
+def health():
+    return "OK"
+
 
 # ================= USERS =================
 
@@ -35,18 +52,17 @@ def add_user(chat_id):
         users.append(chat_id)
         save_users(users)
 
+
 # ================= SAFE REQUEST =================
 
 def safe_request(url):
 
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0"
     }
 
     try:
         r = requests.get(url, headers=headers, timeout=10)
-
         print("STATUS:", r.status_code, url)
 
         if r.status_code == 200:
@@ -59,7 +75,7 @@ def safe_request(url):
         return None
 
 
-# ================= PRICE =================
+# ================= OKX DATA =================
 
 def get_price(symbol):
 
@@ -81,8 +97,6 @@ def get_price(symbol):
         return None
 
 
-# ================= FUNDING =================
-
 def get_funding():
 
     url = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP"
@@ -93,13 +107,10 @@ def get_funding():
         return None
 
     try:
-        rate = data["data"][0]["fundingRate"]
-        return float(rate) * 100
+        return float(data["data"][0]["fundingRate"]) * 100
     except:
         return None
 
-
-# ================= LONG SHORT =================
 
 def get_long_short():
 
@@ -122,8 +133,6 @@ def get_long_short():
     except:
         return None
 
-
-# ================= FEAR =================
 
 def get_fear():
 
@@ -229,20 +238,14 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     btc = get_price("btc")
     funding = get_funding()
-    longshort_data = get_long_short()
-    fear_data = get_fear()
+    ls = get_long_short()
+    fear = get_fear()
 
     btc = f"${btc:,.2f}" if btc else "N/A"
     funding = f"{funding:.4f}%" if funding else "N/A"
 
-    ls_text = "N/A"
-    if longshort_data:
-        ratio, _, _ = longshort_data
-        ls_text = f"{ratio:.2f}"
-
-    fear_text = "N/A"
-    if fear_data:
-        fear_text = f"{fear_data[0]} ({fear_data[1]})"
+    ls_text = f"{ls[0]:.2f}" if ls else "N/A"
+    fear_text = f"{fear[0]} ({fear[1]})" if fear else "N/A"
 
     msg = (
         "📊 Market Overview\n\n"
@@ -256,7 +259,7 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
-# ================= AUTO SEND =================
+# ================= AUTO =================
 
 async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
@@ -267,28 +270,21 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
     btc = get_price("btc")
     funding = get_funding()
-    longshort_data = get_long_short()
-    fear_data = get_fear()
+    ls = get_long_short()
+    fear = get_fear()
 
     btc = f"${btc:,.2f}" if btc else "N/A"
     funding = f"{funding:.4f}%" if funding else "N/A"
 
-    ls_text = "N/A"
-    if longshort_data:
-        ratio, _, _ = longshort_data
-        ls_text = f"{ratio:.2f}"
-
-    fear_text = "N/A"
-    if fear_data:
-        fear_text = f"{fear_data[0]} ({fear_data[1]})"
+    ls_text = f"{ls[0]:.2f}" if ls else "N/A"
+    fear_text = f"{fear[0]} ({fear[1]})" if fear else "N/A"
 
     msg = (
         "⏰ Hourly Crypto Update\n\n"
         f"BTC: {btc}\n"
         f"Funding: {funding}\n"
         f"Long/Short: {ls_text}\n"
-        f"Fear: {fear_text}\n\n"
-        "Data provided by OKX"
+        f"Fear: {fear_text}"
     )
 
     for user in users:
@@ -296,6 +292,20 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=user, text=msg)
         except:
             pass
+
+
+# ================= SELF PING =================
+
+def self_ping():
+
+    while True:
+        try:
+            requests.get(RENDER_URL)
+            print("Self ping success")
+        except:
+            print("Self ping fail")
+
+        time.sleep(600)
 
 
 # ================= HANDLERS =================
@@ -314,15 +324,17 @@ if __name__ == "__main__":
 
     job_queue = app.job_queue
 
-    job_queue.run_repeating(
-        auto_market,
-        interval=3600,
-        first=60
-    )
+    job_queue.run_repeating(auto_market, interval=3600, first=60)
+
+    threading.Thread(target=self_ping).start()
+
+    threading.Thread(
+        target=lambda: web.run(host="0.0.0.0", port=10000)
+    ).start()
 
     app.run_webhook(
         listen="0.0.0.0",
-        port=10000,
+        port=10001,
         url_path="webhook",
         webhook_url=RENDER_URL + "/webhook"
     )
