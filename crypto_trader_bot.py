@@ -9,18 +9,11 @@ RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 USERS_FILE = "users.json"
 
-COIN_MAP = {
-    "btc": "bitcoin",
-    "eth": "ethereum",
-    "sol": "solana",
-    "bnb": "binancecoin"
-}
-
 PAIR_MAP = {
-    "btc": "BTCUSDT",
-    "eth": "ETHUSDT",
-    "sol": "SOLUSDT",
-    "bnb": "BNBUSDT"
+    "btc": "BTC-USDT",
+    "eth": "ETH-USDT",
+    "sol": "SOL-USDT",
+    "bnb": "BNB-USDT"
 }
 
 # ================= USERS =================
@@ -71,83 +64,43 @@ def safe_request(url):
 
 def get_price(symbol):
 
-    coin = COIN_MAP.get(symbol.lower())
     pair = PAIR_MAP.get(symbol.lower())
 
-    if not coin:
-        return None, None
+    if not pair:
+        return None
 
-    # 1 CoinGecko
-    data = safe_request(
-        f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd"
-    )
+    url = f"https://www.okx.com/api/v5/market/ticker?instId={pair}"
 
-    if data and coin in data:
-        return data[coin]["usd"], "CoinGecko"
+    data = safe_request(url)
 
-    # 2 Binance
-    if pair:
-        data = safe_request(
-            f"https://api.binance.com/api/v3/ticker/price?symbol={pair}"
-        )
+    if not data:
+        return None
 
-        if data and "price" in data:
-            return float(data["price"]), "Binance"
-
-    # 3 Bybit
-    if pair:
-        data = safe_request(
-            f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}"
-        )
-
-        if data and data.get("result"):
-            try:
-                return float(data["result"]["list"][0]["lastPrice"]), "Bybit"
-            except:
-                pass
-
-    # 4 OKX
-    if pair:
-        data = safe_request(
-            f"https://www.okx.com/api/v5/market/ticker?instId={pair}"
-        )
-
-        if data and data.get("data"):
-            return float(data["data"][0]["last"]), "OKX"
-
-    return None, None
+    try:
+        return float(data["data"][0]["last"])
+    except:
+        return None
 
 
 # ================= FUNDING =================
 
 def get_funding():
 
-    # 1 Bybit
-    data = safe_request(
-        "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
-    )
+    url = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP"
 
-    if data and data.get("result"):
-        try:
-            rate = data["result"]["list"][0]["fundingRate"]
+    data = safe_request(url)
 
-            if rate:
-                return float(rate) * 100, "Bybit"
-        except:
-            pass
+    if not data:
+        return None
 
-    # 2 Binance
-    data = safe_request(
-        "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
-    )
-
-    if data and "lastFundingRate" in data:
-        return float(data["lastFundingRate"]) * 100, "Binance"
-
-    return None, None
+    try:
+        rate = data["data"][0]["fundingRate"]
+        return float(rate) * 100
+    except:
+        return None
 
 
-# ================= MARKET =================
+# ================= FEAR =================
 
 def get_fear():
 
@@ -159,18 +112,6 @@ def get_fear():
     d = data["data"][0]
 
     return d["value"], d["value_classification"]
-
-
-def get_dominance():
-
-    data = safe_request(
-        "https://api.coingecko.com/api/v3/global"
-    )
-
-    if not data:
-        return None
-
-    return data["data"]["market_cap_percentage"]["btc"]
 
 
 # ================= TELEGRAM =================
@@ -185,11 +126,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🚀 Crypto Trader Bot\n\n"
-        "Auto Market mỗi 1 giờ ⏰\n\n"
+        "Auto update mỗi 1 giờ ⏰\n\n"
         "/price btc\n"
         "/funding\n"
         "/fear\n"
-        "/dominance\n"
         "/market"
     )
 
@@ -201,27 +141,27 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     coin = context.args[0]
 
-    p, source = get_price(coin)
+    p = get_price(coin)
 
     if not p:
         return await update.message.reply_text("Không lấy được giá")
 
     await update.message.reply_text(
         f"💰 {coin.upper()} = ${p:,.2f}\n"
-        f"Source: {source}"
+        f"Source: OKX"
     )
 
 
 async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    rate, source = get_funding()
+    rate = get_funding()
 
     if not rate:
-        return await update.message.reply_text("Không lấy được funding")
+        return await update.message.reply_text("Funding API lỗi")
 
     await update.message.reply_text(
         f"📈 BTC Funding: {rate:.4f}%\n"
-        f"Source: {source}"
+        f"Source: OKX"
     )
 
 
@@ -230,46 +170,31 @@ async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     value, text = get_fear()
 
     if not value:
-        return await update.message.reply_text("API lỗi")
+        return await update.message.reply_text("Fear API lỗi")
 
     await update.message.reply_text(
         f"😨 Fear Index: {value}\n"
-        f"State: {text}"
-    )
-
-
-async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    dom = get_dominance()
-
-    if not dom:
-        return await update.message.reply_text("API lỗi")
-
-    await update.message.reply_text(
-        f"👑 BTC Dominance: {dom:.2f}%\n"
-        f"Source: CoinGecko"
+        f"State: {text}\n"
+        f"Source: alternative.me"
     )
 
 
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    btc, src = get_price("btc")
-    funding, fsrc = get_funding()
+    btc = get_price("btc")
+    funding = get_funding()
     fear, state = get_fear()
-    dom = get_dominance()
 
     btc = f"${btc:,.2f}" if btc else "N/A"
     funding = f"{funding:.4f}%" if funding else "N/A"
     fear_text = f"{fear} ({state})" if fear else "N/A"
-    dom = f"{dom:.2f}%" if dom else "N/A"
 
     msg = (
         "📊 Market Overview\n\n"
         f"BTC: {btc}\n"
         f"Funding: {funding}\n"
-        f"Fear: {fear_text}\n"
-        f"Dominance: {dom}\n\n"
-        "Data provided by CoinGecko"
+        f"Fear: {fear_text}\n\n"
+        "Data provided by OKX"
     )
 
     await update.message.reply_text(msg)
@@ -284,23 +209,20 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
     if not users:
         return
 
-    btc, src = get_price("btc")
-    funding, fsrc = get_funding()
+    btc = get_price("btc")
+    funding = get_funding()
     fear, state = get_fear()
-    dom = get_dominance()
 
     btc = f"${btc:,.2f}" if btc else "N/A"
     funding = f"{funding:.4f}%" if funding else "N/A"
     fear_text = f"{fear} ({state})" if fear else "N/A"
-    dom = f"{dom:.2f}%" if dom else "N/A"
 
     msg = (
         "⏰ Hourly Crypto Update\n\n"
         f"BTC: {btc}\n"
         f"Funding: {funding}\n"
-        f"Fear: {fear_text}\n"
-        f"Dominance: {dom}\n\n"
-        "Data provided by CoinGecko"
+        f"Fear: {fear_text}\n\n"
+        "Data provided by OKX"
     )
 
     for user in users:
@@ -316,7 +238,6 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("price", price))
 app.add_handler(CommandHandler("funding", funding))
 app.add_handler(CommandHandler("fear", fear))
-app.add_handler(CommandHandler("dominance", dominance))
 app.add_handler(CommandHandler("market", market))
 
 
