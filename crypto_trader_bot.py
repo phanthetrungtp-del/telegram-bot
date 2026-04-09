@@ -1,11 +1,15 @@
 import os
 import requests
+import asyncio
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes
+)
 
 TOKEN = os.getenv("BOT_TOKEN")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
-CHAT_ID = os.getenv("CHAT_ID")
 
 COIN_MAP = {
     "btc": "bitcoin",
@@ -14,135 +18,126 @@ COIN_MAP = {
     "bnb": "binancecoin"
 }
 
+chat_id_global = None
+
+# ================= SAFE REQUEST =================
+
+def safe_request(url):
+
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    for _ in range(3):
+        try:
+            r = requests.get(url, headers=headers, timeout=5)
+            if r.status_code == 200:
+                return r.json()
+        except:
+            pass
+
+    return None
+
+
 # ================= API =================
 
 def get_price(symbol):
     symbol = COIN_MAP.get(symbol.lower(), symbol.lower())
 
-    try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usd"
-        r = requests.get(url, timeout=5)
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usd"
+    data = safe_request(url)
 
-        if r.status_code != 200:
-            print("Price error:", r.text)
-            return None
-
-        data = r.json()
-        return data.get(symbol, {}).get("usd")
-
-    except Exception as e:
-        print("Price exception:", e)
+    if not data:
         return None
+
+    return data.get(symbol, {}).get("usd")
 
 
 def get_fear():
+    data = safe_request("https://api.alternative.me/fng/")
+
+    if not data:
+        return None, None
+
     try:
-        url = "https://api.alternative.me/fng/"
-        r = requests.get(url, timeout=5)
-
-        if r.status_code != 200:
-            return None, None
-
-        data = r.json()["data"][0]
-
-        return data["value"], data["value_classification"]
-
-    except Exception as e:
-        print("Fear exception:", e)
+        value = data["data"][0]["value"]
+        state = data["data"][0]["value_classification"]
+        return value, state
+    except:
         return None, None
 
 
 def get_funding():
+    data = safe_request(
+        "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1"
+    )
+
+    if not data:
+        return None
+
     try:
-        url = "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1"
-        r = requests.get(url, timeout=5)
-
-        if r.status_code != 200:
-            return None
-
-        data = r.json()
-
-        if not data:
-            return None
-
         return float(data[0]["fundingRate"]) * 100
-
-    except Exception as e:
-        print("Funding exception:", e)
+    except:
         return None
 
 
 def get_oi():
+    data = safe_request(
+        "https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT"
+    )
+
+    if not data:
+        return None
+
     try:
-        url = "https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT"
-        r = requests.get(url, timeout=5)
-
-        if r.status_code != 200:
-            return None
-
-        data = r.json()
         return float(data["openInterest"])
-
-    except Exception as e:
-        print("OI exception:", e)
+    except:
         return None
 
 
 def get_dominance():
+    data = safe_request(
+        "https://api.coingecko.com/api/v3/global"
+    )
+
+    if not data:
+        return None
+
     try:
-        url = "https://api.coingecko.com/api/v3/global"
-        r = requests.get(url, timeout=5)
-
-        if r.status_code != 200:
-            return None
-
-        data = r.json()
         return data["data"]["market_cap_percentage"]["btc"]
-
-    except Exception as e:
-        print("Dominance exception:", e)
+    except:
         return None
 
 
 def get_long_short():
+    data = safe_request(
+        "https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1"
+    )
+
+    if not data:
+        return None, None
+
     try:
-        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1"
-        r = requests.get(url, timeout=5)
-
-        if r.status_code != 200:
-            return None, None
-
-        data = r.json()
-
-        if not data:
-            return None, None
-
         return float(data[0]["longAccount"]), float(data[0]["shortAccount"])
-
-    except Exception as e:
-        print("LongShort exception:", e)
+    except:
         return None, None
 
 
 def get_top():
-    try:
-        url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=10"
-        r = requests.get(url, timeout=5)
 
-        if r.status_code != 200:
-            return "Không lấy được top crypto"
+    data = safe_request(
+        "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=10"
+    )
 
-        data = r.json()
-
-        text = "🏆 Top 10 Crypto\n\n"
-
-        for i, coin in enumerate(data, 1):
-            text += f"{i}. {coin['symbol'].upper()} — ${coin['current_price']:,}\n"
-
-        return text
-
-    except:
+    if not data:
         return "Lỗi lấy dữ liệu"
+
+    text = "🏆 Top 10 Crypto\n\n"
+
+    for i, coin in enumerate(data, 1):
+        text += f"{i}. {coin['symbol'].upper()} — ${coin['current_price']:,}\n"
+
+    return text
 
 
 # ================= TELEGRAM =================
@@ -151,14 +146,12 @@ telegram_app = ApplicationBuilder().token(TOKEN).build()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global chat_id_global
 
-    global CHAT_ID
-
-    CHAT_ID = update.effective_chat.id
+    chat_id_global = update.effective_chat.id
 
     await update.message.reply_text(
         "🚀 Crypto Trader Bot\n\n"
-        "Auto gửi mỗi 1 giờ đã bật\n\n"
         "/price btc\n"
         "/fear\n"
         "/funding\n"
@@ -166,39 +159,43 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/dominance\n"
         "/longshort\n"
         "/top\n"
-        "/market"
+        "/market\n\n"
+        "Bot sẽ auto gửi mỗi 1 tiếng"
     )
 
 
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if not context.args:
         return await update.message.reply_text("Dùng: /price btc")
 
     coin = context.args[0]
     p = get_price(coin)
 
-    if p is None:
-        return await update.message.reply_text("Không lấy được giá")
-
-    await update.message.reply_text(f"💰 {coin.upper()} = ${p:,}")
+    if p:
+        await update.message.reply_text(f"💰 {coin.upper()} = ${p:,}")
+    else:
+        await update.message.reply_text("Không lấy được dữ liệu")
 
 
 async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    value, text = get_fear()
 
-    if value is None:
+    value, state = get_fear()
+
+    if not value:
         return await update.message.reply_text("Không lấy được Fear Index")
 
     await update.message.reply_text(
-        f"😨 Fear & Greed\n\nIndex: {value}\nState: {text}"
+        f"😨 Fear & Greed\n\nIndex: {value}\nState: {state}"
     )
 
 
 async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     rate = get_funding()
 
     if rate is None:
-        return await update.message.reply_text("Không lấy được funding rate")
+        return await update.message.reply_text("Không lấy được funding")
 
     await update.message.reply_text(
         f"📈 BTC Funding Rate\n\n{rate:.4f}%"
@@ -206,10 +203,11 @@ async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def oi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     oi_value = get_oi()
 
     if oi_value is None:
-        return await update.message.reply_text("Không lấy được Open Interest")
+        return await update.message.reply_text("Không lấy được OI")
 
     await update.message.reply_text(
         f"📊 BTC Open Interest\n\n{oi_value:,.0f}"
@@ -217,10 +215,11 @@ async def oi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     dom = get_dominance()
 
     if dom is None:
-        return await update.message.reply_text("Không lấy được BTC Dominance")
+        return await update.message.reply_text("Không lấy được dominance")
 
     await update.message.reply_text(
         f"👑 BTC Dominance\n\n{dom:.2f}%"
@@ -228,13 +227,14 @@ async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def longshort(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     long, short = get_long_short()
 
     if long is None:
         return await update.message.reply_text("Không lấy được Long/Short")
 
     await update.message.reply_text(
-        f"⚔️ Long / Short Ratio\n\nLong: {long}\nShort: {short}"
+        f"⚔️ Long / Short\n\nLong: {long}\nShort: {short}"
     )
 
 
@@ -249,55 +249,44 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fear_value, state = get_fear()
     dom = get_dominance()
 
-    price_text = f"${price_value:,}" if price_value else "N/A"
-    funding_text = f"{funding_value:.4f}%" if funding_value else "N/A"
-    fear_text = f"{fear_value} ({state})" if fear_value else "N/A"
-    dom_text = f"{dom:.2f}%" if dom else "N/A"
+    msg = "📊 Crypto Market\n\n"
 
-    msg = (
-        "📊 Crypto Market Overview\n\n"
-        f"BTC Price: {price_text}\n"
-        f"Funding: {funding_text}\n"
-        f"Fear Index: {fear_text}\n"
-        f"BTC Dominance: {dom_text}"
-    )
+    if price_value:
+        msg += f"BTC Price: ${price_value:,}\n"
+
+    if funding_value:
+        msg += f"Funding: {funding_value:.4f}%\n"
+
+    if fear_value:
+        msg += f"Fear: {fear_value} ({state})\n"
+
+    if dom:
+        msg += f"Dominance: {dom:.2f}%"
 
     await update.message.reply_text(msg)
 
 
-# ================= AUTO HOURLY =================
+# ================= AUTO SEND =================
 
 async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
-    if not CHAT_ID:
+    global chat_id_global
+
+    if not chat_id_global:
         return
 
     price_value = get_price("btc")
-    funding_value = get_funding()
-    fear_value, state = get_fear()
-    dom = get_dominance()
 
-    price_text = f"${price_value:,}" if price_value else "N/A"
-    funding_text = f"{funding_value:.4f}%" if funding_value else "N/A"
-    fear_text = f"{fear_value} ({state})" if fear_value else "N/A"
-    dom_text = f"{dom:.2f}%" if dom else "N/A"
+    if not price_value:
+        return
 
-    msg = (
-        "⏰ Hourly Crypto Update\n\n"
-        f"BTC Price: {price_text}\n"
-        f"Funding: {funding_text}\n"
-        f"Fear Index: {fear_text}\n"
-        f"BTC Dominance: {dom_text}"
+    await context.bot.send_message(
+        chat_id=chat_id_global,
+        text=f"⏰ Hourly BTC Update\n\nBTC Price: ${price_value:,}"
     )
 
-    await context.bot.send_message(chat_id=CHAT_ID, text=msg)
 
-
-async def error_handler(update, context):
-    print("Error:", context.error)
-
-
-telegram_app.add_error_handler(error_handler)
+# ================= HANDLERS =================
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("price", price))
