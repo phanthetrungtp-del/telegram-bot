@@ -197,7 +197,7 @@ def webhook():
 
     update = Update.de_json(data, telegram_app.bot)
 
-    loop.create_task(telegram_app.process_update(update))
+    loop.create_task(telegram_app.update_queue.put(update))
 
     return "ok"
 
