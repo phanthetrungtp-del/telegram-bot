@@ -3,7 +3,6 @@ import json
 import requests
 import threading
 import time
-from flask import Flask
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -19,19 +18,6 @@ PAIR_MAP = {
     "sol": "SOL-USDT",
     "bnb": "BNB-USDT"
 }
-
-# ================= FLASK =================
-
-web = Flask(__name__)
-
-@web.route("/")
-def home():
-    return "Bot is running"
-
-@web.route("/health")
-def health():
-    return "OK"
-
 
 # ================= USERS =================
 
@@ -63,6 +49,7 @@ def safe_request(url):
 
     try:
         r = requests.get(url, headers=headers, timeout=10)
+
         print("STATUS:", r.status_code, url)
 
         if r.status_code == 200:
@@ -259,7 +246,7 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
-# ================= AUTO =================
+# ================= AUTO SEND =================
 
 async def auto_market(context: ContextTypes.DEFAULT_TYPE):
 
@@ -324,17 +311,17 @@ if __name__ == "__main__":
 
     job_queue = app.job_queue
 
-    job_queue.run_repeating(auto_market, interval=3600, first=60)
+    job_queue.run_repeating(
+        auto_market,
+        interval=3600,
+        first=60
+    )
 
     threading.Thread(target=self_ping).start()
 
-    threading.Thread(
-        target=lambda: web.run(host="0.0.0.0", port=10000)
-    ).start()
-
     app.run_webhook(
         listen="0.0.0.0",
-        port=10001,
+        port=10000,
         url_path="webhook",
         webhook_url=RENDER_URL + "/webhook"
     )
