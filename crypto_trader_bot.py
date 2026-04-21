@@ -4,8 +4,6 @@ import time
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ================= ENV =================
-
 TOKEN = os.getenv("BOT_TOKEN")
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -17,11 +15,13 @@ def safe_request(url):
     for _ in range(3):
         try:
             r = requests.get(url, timeout=10)
-
             print("STATUS:", r.status_code, url)
 
             if r.status_code == 200:
                 return r.json()
+
+            if r.status_code == 429:
+                time.sleep(5)
 
         except Exception as e:
             print("ERROR:", e)
@@ -31,7 +31,7 @@ def safe_request(url):
     return None
 
 
-# ================= PRICE OKX =================
+# ================= PRICE (OKX) =================
 
 def get_price(symbol="btc"):
 
@@ -54,7 +54,7 @@ def get_price(symbol="btc"):
     return None
 
 
-# ================= FUNDING OKX =================
+# ================= FUNDING (OKX) =================
 
 def get_funding():
 
@@ -73,33 +73,39 @@ def get_funding():
 def get_fear():
 
     url = "https://api.alternative.me/fng/"
-
     data = safe_request(url)
 
     if data:
-        value = data["data"][0]["value"]
-        state = data["data"][0]["value_classification"]
-
-        return value, state
+        return data["data"][0]["value"], data["data"][0]["value_classification"]
 
     return None, None
 
 
-# ================= DOMINANCE COINGECKO =================
+# ================= DOMINANCE (CACHE + RETRY) =================
+
+last_dom = None
+last_time = 0
 
 def get_dominance():
+    global last_dom, last_time
+
+    # cache 5 phút
+    if time.time() - last_time < 300:
+        return last_dom
 
     url = "https://api.coingecko.com/api/v3/global"
 
     data = safe_request(url)
 
     if data:
-        return data["data"]["market_cap_percentage"]["btc"]
+        last_dom = data["data"]["market_cap_percentage"]["btc"]
+        last_time = time.time()
+        return last_dom
 
-    return None
+    return last_dom
 
 
-# ================= LONG SHORT OKX =================
+# ================= LONG SHORT (OKX) =================
 
 def get_long_short():
 
@@ -109,17 +115,17 @@ def get_long_short():
 
     if data and "data" in data and len(data["data"]) > 0:
 
-        long_ratio = float(data["data"][0]["longShortRatio"])
+        ratio = float(data["data"][0]["longShortRatio"])
 
-        long = long_ratio
-        short = round(1 / long_ratio, 2)
+        long = ratio
+        short = round(1 / ratio, 2)
 
         return long, short
 
     return None, None
 
 
-# ================= BTC SIGNAL =================
+# ================= SIGNAL =================
 
 def btc_signal():
 
@@ -140,7 +146,7 @@ def btc_signal():
         signal = "LONG 🚀"
 
     return (
-        "📊 BTC Market Signal\n\n"
+        "📊 BTC Signal\n\n"
         f"Price: ${price:,.0f}\n"
         f"Funding: {funding:.4f}%\n"
         f"Fear: {fear} ({state})\n"
@@ -152,31 +158,19 @@ def btc_signal():
 
 # ================= TELEGRAM =================
 
-telegram_app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(TOKEN).build()
+
 
 # ================= COMMAND =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     await update.message.reply_text(
-        "🚀 Crypto Trader Bot\n\n"
-        "/price btc\n"
-        "/funding\n"
-        "/fear\n"
-        "/dominance\n"
-        "/longshort\n"
-        "/signal\n"
-        "/market"
+        "/price btc\n/funding\n/fear\n/dominance\n/longshort\n/signal\n/market"
     )
 
 
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    coin = "btc"
-
-    if context.args:
-        coin = context.args[0]
-
+    coin = context.args[0] if context.args else "btc"
     p = get_price(coin)
 
     if p:
@@ -186,7 +180,6 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     rate = get_funding()
 
     if rate:
@@ -196,19 +189,15 @@ async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     value, state = get_fear()
 
     if value:
-        await update.message.reply_text(
-            f"😨 Fear & Greed\n\n{value} ({state})"
-        )
+        await update.message.reply_text(f"😨 Fear & Greed\n\n{value} ({state})")
     else:
         await update.message.reply_text("Không lấy được fear")
 
 
 async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     dom = get_dominance()
 
     if dom:
@@ -216,11 +205,12 @@ async def dominance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👑 BTC Dominance\n\n{dom:.2f}%\n\nSource: CoinGecko"
         )
     else:
-        await update.message.reply_text("Không lấy được dominance")
+        await update.message.reply_text(
+            "⚠️ Dominance tạm thời unavailable (CoinGecko rate limit)"
+        )
 
 
 async def longshort(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     long, short = get_long_short()
 
     if long:
@@ -228,11 +218,10 @@ async def longshort(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚔️ Long / Short\n\nLong: {long}\nShort: {short}"
         )
     else:
-        await update.message.reply_text("Không lấy được Long/Short")
+        await update.message.reply_text("⚠️ Không lấy được Long/Short")
 
 
 async def signal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     await update.message.reply_text(btc_signal())
 
 
@@ -244,16 +233,16 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dom = get_dominance()
     long, short = get_long_short()
 
-    msg = (
-        "📊 Crypto Market Overview\n\n"
-        f"BTC: ${price:,.0f}\n"
-        f"Funding: {funding:.4f}%\n"
-        f"Fear: {fear} ({state})\n"
-        f"Dominance: {dom:.2f}%\n"
-        f"Long: {long}\n"
-        f"Short: {short}\n\n"
-        "Source: CoinGecko (Dominance)"
-    )
+    msg = "📊 Market Overview\n\n"
+
+    msg += f"BTC: ${price:,.0f}\n" if price else "BTC: N/A\n"
+    msg += f"Funding: {funding:.4f}%\n" if funding else "Funding: N/A\n"
+    msg += f"Fear: {fear} ({state})\n" if fear else "Fear: N/A\n"
+    msg += f"Dominance: {dom:.2f}%\n" if dom else "Dominance: N/A\n"
+    msg += f"Long: {long}\n" if long else "Long: N/A\n"
+    msg += f"Short: {short}\n" if short else "Short: N/A\n"
+
+    msg += "\nSource: CoinGecko (Dominance)"
 
     await update.message.reply_text(msg)
 
@@ -266,55 +255,41 @@ async def auto_market(context: ContextTypes.DEFAULT_TYPE):
     funding = get_funding()
     fear, state = get_fear()
     dom = get_dominance()
-    long, short = get_long_short()
 
-    msg = (
-        "📊 Crypto Market Update (1H)\n\n"
-        f"BTC: ${price:,.0f}\n"
-        f"Funding: {funding:.4f}%\n"
-        f"Fear: {fear} ({state})\n"
-        f"Dominance: {dom:.2f}%\n"
-        f"Long: {long}\n"
-        f"Short: {short}\n\n"
-        "Source: CoinGecko"
-    )
+    msg = "📊 Auto Market Update\n\n"
+
+    msg += f"BTC: ${price:,.0f}\n" if price else "BTC: N/A\n"
+    msg += f"Funding: {funding:.4f}%\n" if funding else "Funding: N/A\n"
+    msg += f"Fear: {fear} ({state})\n" if fear else "Fear: N/A\n"
+    msg += f"Dominance: {dom:.2f}%\n" if dom else "Dominance: N/A\n"
 
     await context.bot.send_message(chat_id=CHAT_ID, text=msg)
 
 
-async def auto_signal(context: ContextTypes.DEFAULT_TYPE):
-
-    await context.bot.send_message(
-        chat_id=CHAT_ID,
-        text=btc_signal()
-    )
-
-
 # ================= HANDLER =================
 
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("price", price))
-telegram_app.add_handler(CommandHandler("funding", funding))
-telegram_app.add_handler(CommandHandler("fear", fear))
-telegram_app.add_handler(CommandHandler("dominance", dominance))
-telegram_app.add_handler(CommandHandler("longshort", longshort))
-telegram_app.add_handler(CommandHandler("signal", signal))
-telegram_app.add_handler(CommandHandler("market", market))
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("price", price))
+app.add_handler(CommandHandler("funding", funding))
+app.add_handler(CommandHandler("fear", fear))
+app.add_handler(CommandHandler("dominance", dominance))
+app.add_handler(CommandHandler("longshort", longshort))
+app.add_handler(CommandHandler("signal", signal))
+app.add_handler(CommandHandler("market", market))
 
 
 # ================= JOB =================
 
-job_queue = telegram_app.job_queue
+job_queue = app.job_queue
 
-job_queue.run_repeating(auto_market, interval=3600, first=20)
-job_queue.run_repeating(auto_signal, interval=3600, first=40)
+if job_queue:
+    job_queue.run_repeating(auto_market, interval=3600, first=20)
 
 
 # ================= RUN =================
 
 if __name__ == "__main__":
-
-    telegram_app.run_webhook(
+    app.run_webhook(
         listen="0.0.0.0",
         port=10000,
         webhook_url=RENDER_URL + "/webhook",
