@@ -138,7 +138,10 @@ async def main():
     # auto job
     telegram_app.job_queue.run_repeating(auto_send, interval=3600, first=10)
 
-
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    print("CHAT_ID =", chat_id)
+    await update.message.reply_text(f"Chat ID của bạn: {chat_id}")
 if __name__ == "__main__":
     loop.run_until_complete(main())
 
